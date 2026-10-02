@@ -1,0 +1,148 @@
+# Seed source registry. This is a starting point — the system adds discovered
+# sources to the database itself. Every URL below was verified live on 2026-10-02.
+#
+# tier:  A official (gov / military / NATO / intelligence)   B wire agency
+#        C quality international media   D local / regional media
+#        E think tank (stored as ASSESSMENT/ANALYSIS)   F OSINT researchers
+#        G social / unverified   S state-controlled media of a party
+# side:  nato | ru | by | ua | neutral  — whose position the source primarily carries
+# reliability: prior 0..1, adjusted over time by the feedback loop
+# focused: true = topic-specific source, every item goes to AI triage;
+#          false = general source, items must pass the keyword pre-filter first
+#
+# kinds: rss | telegram (public channel via t.me/s/) | web (list page + linkPattern)
+#        gdelt (GDELT DOC API query) | bluesky (public author feed)
+
+defaults:
+  A: { reliability: 0.9, focused: true }
+  B: { reliability: 0.9, focused: false }
+  C: { reliability: 0.8, focused: false }
+  D: { reliability: 0.75, focused: false }
+  E: { reliability: 0.75, focused: true }
+  F: { reliability: 0.65, focused: true }
+  G: { reliability: 0.4, focused: true }
+  S: { reliability: 0.5, focused: false }
+
+sources:
+  # ---------- A: official ----------
+  - { key: defmin-fi, name: "Минобороны Финляндии", kind: web, url: "https://www.defmin.fi/en/topical", tier: A, side: nato, country: FI, lang: en, config: { linkPattern: "^/en/-/" } }
+  - { key: forsvarsmakten-en, name: "Вооружённые силы Швеции", kind: web, url: "https://www.forsvarsmakten.se/en/news-and-events/news/", tier: A, side: nato, country: SE, lang: en, config: { linkPattern: "^/en/news-and-events/news/[a-z0-9-]{8,}/?$" } }
+  - { key: ee-mil, name: "Силы обороны Эстонии", kind: rss, url: "https://mil.ee/en/feed/", tier: A, side: nato, country: EE, lang: en }
+  - { key: lv-mod, name: "Минобороны Латвии", kind: rss, url: "https://www.mod.gov.lv/en/rss.xml", tier: A, side: nato, country: LV, lang: lv }
+  - { key: uk-mod, name: "Минобороны Великобритании", kind: rss, url: "https://www.gov.uk/government/organisations/ministry-of-defence.atom", tier: A, side: nato, country: GB, lang: en, focused: false }
+  - { key: uk-fcdo-russia, name: "МИД Великобритании (Россия)", kind: rss, url: "https://www.gov.uk/search/news-and-communications.atom?world_locations%5B%5D=russia", tier: A, side: nato, country: GB, lang: en }
+  - { key: us-dod, name: "Пентагон", kind: rss, url: "https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=1&Site=945&max=20", tier: A, side: nato, country: US, lang: en, focused: false }
+  - { key: us-state, name: "Госдеп США", kind: rss, url: "https://www.state.gov/rss-feed/press-releases/feed/", tier: A, side: nato, country: US, lang: en, focused: false }
+  - { key: se-regeringen, name: "Правительство Швеции", kind: rss, url: "https://www.regeringen.se/Filter/RssFeed?filterType=Taxonomy&filterByType=FilterablePageBase&preFilteredCategories=1293", tier: A, side: nato, country: SE, lang: sv, focused: false }
+  - { key: kremlin-ru, name: "Кремль", kind: rss, url: "http://kremlin.ru/events/all/feed", tier: A, side: ru, country: RU, lang: ru, focused: false }
+  - { key: mid-ru, name: "МИД России", kind: rss, url: "https://mid.ru/ru/rss.php", tier: A, side: ru, country: RU, lang: ru, focused: false }
+  - { key: tg-mod-russia, name: "Минобороны России (Telegram)", kind: telegram, url: "https://t.me/s/mod_russia", tier: A, side: ru, country: RU, lang: ru, focused: false }
+  - { key: tg-mid-russia, name: "МИД России (Telegram)", kind: telegram, url: "https://t.me/s/MID_Russia", tier: A, side: ru, country: RU, lang: ru, focused: false }
+  - { key: tg-modmilby, name: "Минобороны Беларуси (Telegram)", kind: telegram, url: "https://t.me/s/modmilby", tier: A, side: by, country: BY, lang: ru }
+  - { key: tg-pul-1, name: "Пул Первого (пресс-служба Лукашенко)", kind: telegram, url: "https://t.me/s/pul_1", tier: A, side: by, country: BY, lang: ru, focused: false }
+  # Official sites without feeds / behind bot protection — via GDELT's index.
+  - { key: gdelt-official, name: "GDELT: официальные сайты", kind: gdelt, url: "https://api.gdeltproject.org/", tier: A, side: nato, country: "", lang: en, config: { query: "(domainis:nato.int OR domainis:shape.nato.int OR domainis:ac.nato.int OR domainis:mc.nato.int OR domainis:puolustusvoimat.fi OR domainis:raja.fi OR domainis:supo.fi OR domainis:kam.lt OR domainis:vsd.lt OR domainis:kapo.ee OR domainis:forsvaret.no OR domainis:fe-ddis.dk OR domainis:eucom.mil OR domainis:gov.pl)", timespan: "12h", max: 50 } }
+
+  # ---------- B / C: agencies and international media ----------
+  - { key: bbc-europe, name: BBC, kind: rss, url: "https://feeds.bbci.co.uk/news/world/europe/rss.xml", tier: C, side: neutral, country: GB, lang: en }
+  - { key: bbc-russian, name: "Би-би-си", kind: rss, url: "https://feeds.bbci.co.uk/russian/rss.xml", tier: C, side: neutral, country: GB, lang: ru }
+  - { key: guardian-russia, name: Guardian, kind: rss, url: "https://www.theguardian.com/world/russia/rss", tier: C, side: neutral, country: GB, lang: en, focused: true }
+  - { key: guardian-nato, name: Guardian, kind: rss, url: "https://www.theguardian.com/world/nato/rss", tier: C, side: neutral, country: GB, lang: en, focused: true }
+  - { key: dw-en, name: DW, kind: rss, url: "https://rss.dw.com/rdf/rss-en-all", tier: C, side: neutral, country: DE, lang: en }
+  - { key: dw-ru, name: DW, kind: rss, url: "https://rss.dw.com/rdf/rss-ru-all", tier: C, side: neutral, country: DE, lang: ru }
+  - { key: france24-europe, name: France24, kind: rss, url: "https://www.france24.com/en/europe/rss", tier: C, side: neutral, country: FR, lang: en }
+  - { key: euronews, name: Euronews, kind: rss, url: "https://www.euronews.com/rss?level=theme&name=news", tier: C, side: neutral, country: FR, lang: en }
+  - { key: politico-eu, name: "Politico Europe", kind: rss, url: "https://www.politico.eu/feed/", tier: C, side: neutral, country: BE, lang: en }
+  - { key: sky-world, name: "Sky News", kind: rss, url: "https://feeds.skynews.com/feeds/rss/world.xml", tier: C, side: neutral, country: GB, lang: en }
+  - { key: rferl, name: "RFE/RL", kind: rss, url: "https://www.rferl.org/api/", tier: C, side: neutral, country: CZ, lang: en }
+  - { key: svoboda, name: "Радио Свобода", kind: rss, url: "https://www.svoboda.org/api/", tier: C, side: neutral, country: CZ, lang: ru }
+  - { key: tagesschau, name: Tagesschau, kind: rss, url: "https://www.tagesschau.de/xml/rss2", tier: C, side: neutral, country: DE, lang: de }
+  - { key: spiegel, name: Spiegel, kind: rss, url: "https://www.spiegel.de/ausland/index.rss", tier: C, side: neutral, country: DE, lang: de }
+  - { key: meduza, name: "Медуза", kind: rss, url: "https://meduza.io/rss/all", tier: C, side: neutral, country: LV, lang: ru }
+  - { key: meduza-en, name: Meduza, kind: rss, url: "https://meduza.io/rss/en/all", tier: C, side: neutral, country: LV, lang: en }
+  - { key: novayagazeta-eu, name: "Новая газета Европа", kind: rss, url: "https://novayagazeta.eu/feed/rss", tier: C, side: neutral, country: LV, lang: ru }
+  - { key: moscowtimes, name: "Moscow Times", kind: rss, url: "https://www.themoscowtimes.com/rss/news", tier: C, side: neutral, country: NL, lang: en }
+  - { key: kommersant, name: "Коммерсантъ", kind: rss, url: "https://www.kommersant.ru/RSS/news.xml", tier: C, side: ru, country: RU, lang: ru }
+  - { key: interfax, name: "Интерфакс", kind: rss, url: "https://www.interfax.ru/rss.asp", tier: B, side: ru, country: RU, lang: ru }
+  - { key: kyivindependent, name: "Kyiv Independent", kind: rss, url: "https://kyivindependent.com/news-archive/rss/", tier: C, side: ua, country: UA, lang: en }
+  - { key: euromaidan-press, name: "Euromaidan Press", kind: rss, url: "https://euromaidanpress.com/feed/", tier: D, side: ua, country: UA, lang: en }
+  # Wire coverage (Reuters/AP/AFP have no public feeds): discovered through GDELT.
+  - { key: gdelt-en, name: "GDELT: английский", kind: gdelt, url: "https://api.gdeltproject.org/", tier: B, side: neutral, country: "", lang: en, focused: false, config: { query: "(NATO OR Kaliningrad OR Suwalki OR \"Baltic Sea\" OR \"eastern flank\") (Russia OR Russian OR Belarus) (military OR drone OR airspace OR sabotage OR troops OR exercise OR warns OR intelligence) sourcelang:english", timespan: "6h", max: 75 } }
+  - { key: gdelt-ru, name: "GDELT: русский", kind: gdelt, url: "https://api.gdeltproject.org/", tier: B, side: neutral, country: "", lang: ru, focused: false, config: { query: "(НАТО OR Калининград OR Прибалтика OR Балтийском) (учения OR войска OR беспилотник OR угроза OR граница OR Минобороны) sourcelang:russian", timespan: "6h", max: 60 } }
+  - { key: gdelt-nordic-baltic, name: "GDELT: Северная Европа и Балтия", kind: gdelt, url: "https://api.gdeltproject.org/", tier: D, side: neutral, country: "", lang: mul, focused: false, config: { query: "(NATO OR Nato) (Venäjä OR Ryssland OR Russland OR Rosja OR Rosji) (sourcecountry:finland OR sourcecountry:sweden OR sourcecountry:norway OR sourcecountry:poland OR sourcecountry:estonia OR sourcecountry:latvia OR sourcecountry:lithuania)", timespan: "6h", max: 75 } }
+
+  # ---------- D: local / regional media ----------
+  - { key: yle-news-en, name: "Yle News", kind: rss, url: "https://feeds.yle.fi/uutiset/v1/recent.rss?publisherIds=YLE_NEWS", tier: D, side: neutral, country: FI, lang: en }
+  - { key: yle-uutiset, name: "Yle Uutiset", kind: rss, url: "https://feeds.yle.fi/uutiset/v1/majorHeadlines/YLE_UUTISET.rss", tier: D, side: neutral, country: FI, lang: fi }
+  - { key: yle-novosti, name: "Yle Новости", kind: rss, url: "https://feeds.yle.fi/uutiset/v1/recent.rss?publisherIds=YLE_NOVOSTI", tier: D, side: neutral, country: FI, lang: ru }
+  - { key: hs, name: "Helsingin Sanomat", kind: rss, url: "https://www.hs.fi/rss/tuoreimmat.xml", tier: D, side: neutral, country: FI, lang: fi }
+  - { key: iltalehti, name: Iltalehti, kind: rss, url: "https://www.iltalehti.fi/rss/uutiset.xml", tier: D, side: neutral, country: FI, lang: fi }
+  - { key: is, name: "Ilta-Sanomat", kind: rss, url: "https://www.is.fi/rss/tuoreimmat.xml", tier: D, side: neutral, country: FI, lang: fi }
+  - { key: err-news, name: "ERR News", kind: rss, url: "https://news.err.ee/rss", tier: D, side: neutral, country: EE, lang: en }
+  - { key: err-rus, name: "ERR", kind: rss, url: "https://rus.err.ee/rss", tier: D, side: neutral, country: EE, lang: ru }
+  - { key: postimees-en, name: Postimees, kind: rss, url: "https://news.postimees.ee/rss", tier: D, side: neutral, country: EE, lang: en }
+  - { key: lsm-en, name: LSM, kind: rss, url: "https://eng.lsm.lv/rss/", tier: D, side: neutral, country: LV, lang: en }
+  - { key: lsm-ru, name: LSM, kind: rss, url: "https://rus.lsm.lv/rss/", tier: D, side: neutral, country: LV, lang: ru }
+  - { key: delfi-lv-rus, name: "Delfi Латвия", kind: rss, url: "https://rus.delfi.lv/rss.xml", tier: D, side: neutral, country: LV, lang: ru }
+  - { key: lrt-en, name: LRT, kind: rss, url: "https://www.lrt.lt/en/news-in-english?rss", tier: D, side: neutral, country: LT, lang: en }
+  - { key: lrt-ru, name: LRT, kind: rss, url: "https://www.lrt.lt/ru/novosti?rss", tier: D, side: neutral, country: LT, lang: ru }
+  - { key: 15min, name: "15min", kind: rss, url: "https://www.15min.lt/rss", tier: D, side: neutral, country: LT, lang: lt }
+  - { key: delfi-lt, name: "Delfi Lithuania", kind: rss, url: "https://www.delfi.lt/rss/feeds/daily.xml", tier: D, side: neutral, country: LT, lang: lt }
+  - { key: tvn24, name: TVN24, kind: rss, url: "https://tvn24.pl/najnowsze.xml", tier: D, side: neutral, country: PL, lang: pl }
+  - { key: rmf24, name: RMF24, kind: rss, url: "https://www.rmf24.pl/fakty/feed", tier: D, side: neutral, country: PL, lang: pl }
+  - { key: rp, name: Rzeczpospolita, kind: rss, url: "https://www.rp.pl/rss_main", tier: D, side: neutral, country: PL, lang: pl }
+  - { key: onet, name: Onet, kind: rss, url: "https://wiadomosci.onet.pl/.feed", tier: D, side: neutral, country: PL, lang: pl }
+  - { key: notesfrompoland, name: "Notes from Poland", kind: rss, url: "https://notesfrompoland.com/feed/", tier: D, side: neutral, country: PL, lang: en }
+  - { key: svt, name: SVT, kind: rss, url: "https://www.svt.se/nyheter/rss.xml", tier: D, side: neutral, country: SE, lang: sv }
+  - { key: sr-ekot, name: "SR Ekot", kind: rss, url: "https://api.sr.se/api/rss/program/83", tier: D, side: neutral, country: SE, lang: sv }
+  - { key: dn, name: "Dagens Nyheter", kind: rss, url: "https://www.dn.se/rss/", tier: D, side: neutral, country: SE, lang: sv }
+  - { key: svd, name: "Svenska Dagbladet", kind: rss, url: "https://www.svd.se/feed/articles.rss", tier: D, side: neutral, country: SE, lang: sv }
+  - { key: nrk, name: NRK, kind: rss, url: "https://www.nrk.no/toppsaker.rss", tier: D, side: neutral, country: "NO", lang: "no" }
+  - { key: nrk-nordland, name: "NRK Nordland", kind: rss, url: "https://www.nrk.no/nordland/toppsaker.rss", tier: D, side: neutral, country: "NO", lang: "no" }
+  - { key: nrk-tromsfinnmark, name: "NRK Troms og Finnmark", kind: rss, url: "https://www.nrk.no/tromsogfinnmark/toppsaker.rss", tier: D, side: neutral, country: "NO", lang: "no" }
+  - { key: vg, name: VG, kind: rss, url: "https://www.vg.no/rss/feed", tier: D, side: neutral, country: "NO", lang: "no" }
+  - { key: aftenposten, name: Aftenposten, kind: rss, url: "https://www.aftenposten.no/rss", tier: D, side: neutral, country: "NO", lang: "no" }
+  - { key: barentsobserver, name: "Barents Observer", kind: web, url: "https://www.thebarentsobserver.com/", tier: D, side: neutral, country: "NO", lang: en, focused: true, config: { linkPattern: "^/(news|security)/.+/\\d+$" } }
+  - { key: highnorthnews, name: "High North News", kind: web, url: "https://www.highnorthnews.com/en", tier: D, side: neutral, country: "NO", lang: en, focused: true, config: { linkPattern: "^/a/\\d+$" } }
+  - { key: dr, name: DR, kind: rss, url: "https://www.dr.dk/nyheder/service/feeds/allenyheder", tier: D, side: neutral, country: DK, lang: da }
+  - { key: berlingske, name: Berlingske, kind: rss, url: "https://www.berlingske.dk/content/rss", tier: D, side: neutral, country: DK, lang: da }
+  - { key: zerkalo, name: "Зеркало (Беларусь)", kind: rss, url: "https://news.zerkalo.io/rss/all.rss", tier: D, side: neutral, country: BY, lang: ru }
+
+  # ---------- Defence media ----------
+  - { key: defensenews, name: "Defense News", kind: rss, url: "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml", tier: C, side: neutral, country: US, lang: en, focused: true }
+  - { key: breakingdefense, name: "Breaking Defense", kind: rss, url: "https://breakingdefense.com/feed/", tier: C, side: neutral, country: US, lang: en, focused: true }
+  - { key: twz, name: "The War Zone", kind: rss, url: "https://www.twz.com/feed", tier: C, side: neutral, country: US, lang: en, focused: true }
+  - { key: ukdj, name: "UK Defence Journal", kind: rss, url: "https://ukdefencejournal.org.uk/feed/", tier: D, side: neutral, country: GB, lang: en, focused: true }
+  - { key: navalnews, name: "Naval News", kind: rss, url: "https://www.navalnews.com/feed/", tier: D, side: neutral, country: FR, lang: en, focused: true }
+  - { key: defence24, name: Defence24, kind: rss, url: "https://defence24.com/rss", tier: D, side: neutral, country: PL, lang: en, focused: true }
+  - { key: defence24-pl, name: Defence24, kind: rss, url: "https://defence24.pl/rss", tier: D, side: neutral, country: PL, lang: pl, focused: true }
+
+  # ---------- S: state-controlled media of a party (position indicators, not facts) ----------
+  - { key: tass-en, name: "ТАСС", kind: rss, url: "https://tass.com/rss/v2.xml", tier: S, side: ru, country: RU, lang: en }
+  - { key: tass-ru, name: "ТАСС", kind: rss, url: "https://tass.ru/rss/v2.xml", tier: S, side: ru, country: RU, lang: ru }
+  - { key: belta-ru, name: "БелТА", kind: rss, url: "https://www.belta.by/rss", tier: S, side: by, country: BY, lang: ru }
+
+  # ---------- E: think tanks ----------
+  - { key: isw, name: ISW, kind: web, url: "https://understandingwar.org/research/", tier: E, side: neutral, country: US, lang: en, config: { linkPattern: "^/research/russia-ukraine/.+" } }
+  - { key: rusi, name: RUSI, kind: rss, url: "https://www.rusi.org/rss/latest-commentary.xml", tier: E, side: neutral, country: GB, lang: en }
+  - { key: fiia, name: FIIA, kind: rss, url: "https://fiia.fi/en/feed", tier: E, side: neutral, country: FI, lang: en }
+  - { key: icds, name: ICDS, kind: rss, url: "https://icds.ee/en/feed/", tier: E, side: neutral, country: EE, lang: en }
+  - { key: atlanticcouncil, name: "Atlantic Council", kind: rss, url: "https://www.atlanticcouncil.org/feed/", tier: E, side: neutral, country: US, lang: en }
+  - { key: cepa, name: CEPA, kind: rss, url: "https://cepa.org/feed/", tier: E, side: neutral, country: US, lang: en }
+  - { key: osw, name: OSW, kind: rss, url: "https://www.osw.waw.pl/en/rss.xml", tier: E, side: neutral, country: PL, lang: en }
+  - { key: warontherocks, name: "War on the Rocks", kind: rss, url: "https://warontherocks.com/feed/", tier: E, side: neutral, country: US, lang: en }
+  - { key: jamestown, name: Jamestown, kind: rss, url: "https://jamestown.org/feed/", tier: E, side: neutral, country: US, lang: en }
+  - { key: riddle, name: Riddle, kind: rss, url: "https://ridl.io/feed/", tier: E, side: neutral, country: LT, lang: en }
+
+  # ---------- F: OSINT / investigations ----------
+  - { key: bellingcat, name: Bellingcat, kind: rss, url: "https://www.bellingcat.com/feed/", tier: F, side: neutral, country: NL, lang: en }
+  - { key: dfrlab, name: "DFRLab", kind: rss, url: "https://dfrlab.org/feed/", tier: F, side: neutral, country: US, lang: en }
+  - { key: frontelligence, name: "Frontelligence Insight", kind: rss, url: "https://frontelligence.substack.com/feed", tier: F, side: neutral, country: "", lang: en }
+  - { key: insider, name: "The Insider", kind: rss, url: "https://theins.ru/feed", tier: F, side: neutral, country: LV, lang: ru, focused: false }
+  - { key: agentstvo, name: "Агентство", kind: rss, url: "https://www.agents.media/feed/", tier: F, side: neutral, country: "", lang: ru, focused: false }
+  - { key: istories, name: "Важные истории", kind: rss, url: "https://istories.media/rss/all.xml", tier: F, side: neutral, country: "", lang: ru, focused: false }
+  - { key: tg-citeam, name: "CIT (Conflict Intelligence Team)", kind: telegram, url: "https://t.me/s/CITeam", tier: F, side: neutral, country: "", lang: ru }
+
+  # ---------- G: social / partisan channels (discovery only, never sole basis for a FACT) ----------
+  - { key: tg-belamova, name: "Беларуская выведка (belamova)", kind: telegram, url: "https://t.me/s/belamova", tier: G, side: neutral, country: BY, lang: ru }
+  - { key: tg-rybar, name: "Рыбарь (провоенный канал)", kind: telegram, url: "https://t.me/s/rybar", tier: G, side: ru, country: RU, lang: ru, focused: false }

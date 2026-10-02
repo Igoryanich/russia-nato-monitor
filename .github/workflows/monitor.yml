@@ -1,0 +1,92 @@
+name: monitor
+
+# Russia–NATO Monitor. The full cycle runs hourly; between cycles a cheap "quick"
+# job answers the admin bot and delivers approved posts. State (SQLite) lives on
+# the `state` branch as a single force-pushed commit, so history never grows.
+#
+# Repository secrets: GEMINI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, TELEGRAM_ADMIN_CHAT_ID
+# Repository variables (optional): DRY_RUN (default true!), PUBLISH_MODE (review|auto), PUBLISH_THRESHOLD
+
+on:
+  schedule:
+    - cron: "7 * * * *"          # full cycle, hourly
+    - cron: "22,37,52 * * * *"   # quick admin/publish pass
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "cycle or quick"
+        default: cycle
+
+concurrency:
+  group: monitor-state   # one writer to the state branch at a time
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+      TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+      DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
+      PUBLISH_MODE: ${{ vars.PUBLISH_MODE || 'review' }}
+      PUBLISH_THRESHOLD: ${{ vars.PUBLISH_THRESHOLD || '' }}
+      DATABASE_PATH: data/monitor.db
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci --omit=dev
+
+      - name: Restore state
+        run: |
+          mkdir -p data
+          if git fetch --depth=1 origin state 2>/dev/null; then
+            git show origin/state:monitor.db > data/monitor.db
+            echo "restored $(du -h data/monitor.db | cut -f1)"
+          else
+            echo "no state branch yet — starting fresh"
+          fi
+
+      - name: Pick mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT";
+          elif [ "${{ github.event.schedule }}" = "7 * * * *" ]; then echo "mode=cycle" >> "$GITHUB_OUTPUT";
+          else echo "mode=quick" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Quick pass
+        if: steps.mode.outputs.mode == 'quick'
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ ! -f data/monitor.db ]; then echo "nothing to do"; exit 0; fi
+          node src/cli.ts quick
+
+      - name: Full cycle
+        if: steps.mode.outputs.mode == 'cycle'
+        run: |
+          node src/cli.ts cycle
+          node src/cli.ts report out/report.html
+
+      - name: Save state
+        if: always()
+        run: |
+          [ -f data/monitor.db ] || exit 0
+          tmp=$(mktemp -d)
+          cp data/monitor.db "$tmp/"
+          [ -f out/report.html ] && cp out/report.html "$tmp/"
+          cd "$tmp"
+          git init -q -b state
+          git config user.name "monitor-bot"
+          git config user.email "monitor-bot@users.noreply.github.com"
+          git add -A
+          git commit -q -m "state $(date -u +%FT%TZ) [skip ci]"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" state
