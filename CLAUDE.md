@@ -39,7 +39,9 @@ On Git Bash, `node src/cli.ts admin "/status"` needs `MSYS_NO_PATHCONV=1` (MSYS 
 - Independence = distinct *origins* (re-prints of one wire story count once).
 - Only `NEW_EVENT` / `SIGNIFICANT_UPDATE` are published; updates reply to the original post.
 - No coordinates, no model-generated links, Russian text only — hard checks.
-- Social-only (tier G) sourcing or `headline_risk` ⇒ human review, never auto.
+- Soft-check failures (tier-G-only sourcing, `headline_risk`, FACT attributed to a ministry, coordinates)
+  are never auto-published: human review in `review` mode, held back (background) in `auto` mode.
+  The owner chose `auto` on 2026-10-02 (no manual approval, like the AI channel).
 - The escalation index is labelled as indicator intensity, never a war probability.
 - Telegram delivery: `sending` is committed before the request; ambiguous outcomes become
   `uncertain` and are never auto-retried.

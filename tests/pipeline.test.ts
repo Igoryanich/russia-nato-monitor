@@ -111,10 +111,18 @@ test("editorial gate: fresh significant event is queued, stale/old/duplicate one
   assert.equal(queuePublications(db, cfg).queued, 0);
 });
 
-test("editorial gate: social-only or risky headline goes to human review, not straight to the channel", () => {
+test("editorial gate: risky item is held back in auto mode, sent to review in review mode", () => {
   const db = seededDb();
-  insertEvent(db, analysis({ headline_risk: true }));
-  const r = queuePublications(db, cfg);
+  const id = insertEvent(db, analysis({ headline_risk: true }));
+  const auto = queuePublications(db, cfg);
+  assert.equal(auto.queued, 0);
+  assert.equal(auto.review, 0);
+  assert.equal(db.get<{ status: string }>("SELECT status FROM events WHERE id = ?", id)!.status, "background");
+  assert.equal(db.get<{ n: number }>("SELECT COUNT(*) n FROM publications")!.n, 0);
+
+  const db2 = seededDb();
+  insertEvent(db2, analysis({ headline_risk: true }));
+  const r = queuePublications(db2, { ...cfg, PUBLISH_MODE: "review" });
   assert.equal(r.review, 1);
   assert.equal(r.queued, 0);
   const checks = editorialChecks(
@@ -191,7 +199,7 @@ test("dry run queues but never sends", async () => {
 test("admin approve/reject and commands", async () => {
   const db = seededDb();
   insertEvent(db, analysis({ headline_risk: true }));
-  queuePublications(db, cfg);
+  queuePublications(db, { ...cfg, PUBLISH_MODE: "review" });
   const pub = db.get<{ id: number }>("SELECT id FROM publications WHERE status = 'review'")!;
   assert.match(approve(db, pub.id), /одобрено/);
   assert.equal(db.get<{ status: string }>("SELECT status FROM publications WHERE id = ?", pub.id)!.status, "pending");
@@ -228,4 +236,17 @@ test("digest renders sections and the index disclaimer", () => {
   assert.match(text, /<b>47<\/b>\/100 \(\+4 за сутки\)/);
   assert.match(text, /🟢 <b>Контрсигналы<\/b>/);
   assert.match(text, /не вероятность войны/);
+});
+
+test("switching review → auto releases clean waiting posts and drops their admin previews", () => {
+  const db = seededDb();
+  const id = insertEvent(db, analysis());
+  queuePublications(db, { ...cfg, PUBLISH_MODE: "review", TELEGRAM_ADMIN_CHAT_ID: "42" });
+  const pub = db.get<{ id: number; status: string }>("SELECT id, status FROM publications WHERE kind = 'post'")!;
+  assert.equal(pub.status, "review");
+  db.run("UPDATE events SET status = 'review' WHERE id = ?", id);
+  queuePublications(db, cfg); // auto
+  assert.equal(db.get<{ status: string }>("SELECT status FROM publications WHERE id = ?", pub.id)!.status, "pending");
+  assert.equal(db.get<{ status: string }>("SELECT status FROM publications WHERE key = ?", `admin:${pub.id}`)!.status, "cancelled");
+  assert.equal(db.get<{ status: string }>("SELECT status FROM events WHERE id = ?", id)!.status, "queued");
 });

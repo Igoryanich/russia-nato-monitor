@@ -117,9 +117,24 @@ export function queuePublications(db: Db, cfg: Config): { queued: number; review
       continue;
     }
     const soft = checks.some((c) => !c.hard && !c.ok);
+    // Auto mode has no human in the loop: a soft-check failure is held back, never auto-published.
+    if (soft && mode === "auto") {
+      if (existing) db.run("UPDATE publications SET status = 'cancelled', error = 'held: soft editorial check' WHERE id = ?", existing.id);
+      if (ev.status !== "published") {
+        db.run("UPDATE events SET status = 'background', review_note = ? WHERE id = ?", note, ev.id);
+        background++;
+      }
+      continue;
+    }
     const needsReview = soft || mode === "review";
     if (existing) {
-      db.run("UPDATE publications SET text = ?, priority = MAX(priority, ?) WHERE id = ?", post, ev.importance, existing.id);
+      const status = needsReview ? existing.status : "pending";
+      db.run("UPDATE publications SET text = ?, status = ?, priority = MAX(priority, ?) WHERE id = ?", post, status, ev.importance, existing.id);
+      if (!needsReview) {
+        // Switched to auto: the waiting preview in the admin chat is obsolete.
+        db.run("UPDATE publications SET status = 'cancelled', error = 'auto mode' WHERE key = ? AND status = 'pending'", `admin:${existing.id}`);
+        if (ev.status === "review") db.run("UPDATE events SET status = 'queued' WHERE id = ?", ev.id);
+      }
       db.run("UPDATE events SET review_note = ? WHERE id = ?", note, ev.id);
       continue;
     }

@@ -123,7 +123,7 @@ export async function maybeDigest(db: Db, llm: Llm, cfg: Config, force = false):
   const text = await buildDigest(db, llm, cfg, day);
   db.run(
     `INSERT INTO publications(key, channel, kind, text, status, created_at, priority) VALUES(?,?,?,?,?,?,500)
-     ON CONFLICT(key, channel) DO UPDATE SET text = excluded.text WHERE status IN ('review','pending')`,
+     ON CONFLICT(key, channel) DO UPDATE SET text = excluded.text, status = excluded.status WHERE status IN ('review','pending')`,
     key, channel, "digest", text, effectiveMode(db, cfg) === "review" ? "review" : "pending", nowIso(),
   );
   if (effectiveMode(db, cfg) === "review" && cfg.TELEGRAM_ADMIN_CHAT_ID) {
