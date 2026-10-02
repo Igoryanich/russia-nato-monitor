@@ -51,6 +51,18 @@ try {
       console.log({ admin, editorial, guard, publish: await drain(db, config, tg) });
       break;
     }
+    case "digest-send": {
+      // Scheduled ~10 min before DIGEST_HOUR_LOCAL: build now, publish exactly on the hour.
+      const { maybeDigest } = await import("./pipeline/digest.ts");
+      const { Telegram } = await import("./telegram.ts");
+      const { drain } = await import("./pipeline/publish.ts");
+      const { msUntilLocalHour } = await import("./util.ts");
+      console.log({ digest: await maybeDigest(db, llm, config, true) });
+      const wait = msUntilLocalHour(config.TIMEZONE, config.DIGEST_HOUR_LOCAL);
+      if (wait > 0 && wait < 20 * 60_000) await new Promise((r) => setTimeout(r, wait));
+      console.log({ publish: await drain(db, config, config.TELEGRAM_BOT_TOKEN ? new Telegram(config.TELEGRAM_BOT_TOKEN) : null) });
+      break;
+    }
     case "collect":
       console.log(await collectAll(db, config, args));
       break;

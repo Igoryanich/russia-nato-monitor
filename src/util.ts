@@ -76,3 +76,11 @@ export function localDate(tz: string, d = new Date()): string {
 export function localHour(tz: string, d = new Date()): number {
   return Number(new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", hour12: false }).format(d)) % 24;
 }
+
+/** Milliseconds until the next HH:00 in an IANA timezone today (≤ 0 if already past). */
+export function msUntilLocalHour(tz: string, hour: number, now = new Date()): number {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).formatToParts(now);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+  const secondsToday = (get("hour") % 24) * 3600 + get("minute") * 60 + get("second");
+  return (hour * 3600 - secondsToday) * 1000 - now.getMilliseconds();
+}

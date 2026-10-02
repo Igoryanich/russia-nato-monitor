@@ -44,8 +44,9 @@ const schema = z.object({
   TELEGRAM_BOT_TOKEN: str(),
   TELEGRAM_CHANNEL_ID: str(),
   TELEGRAM_ADMIN_CHAT_ID: str(),
-  DIGEST_HOUR_LOCAL: int(20),
-  TIMEZONE: str("Europe/Helsinki"),
+  // Daily digest at 21:00 Moscow time (owner's choice, 2026-10-02). Also the calendar for index days.
+  DIGEST_HOUR_LOCAL: int(21),
+  TIMEZONE: str("Europe/Moscow"),
   GDELT_ENABLED: bool.transform((v) => v ?? true),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).optional().default("info"),
 });

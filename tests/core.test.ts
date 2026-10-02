@@ -79,3 +79,9 @@ test("degraded clustering without embeddings: merges only on strong event_key ev
   assert.equal(decideMerge(null, { event_key: "russia-drones-violate-poland-airspace-2026-10", category: "drone_incident", region: "Poland" }, [ev])?.id, 3);
   assert.equal(decideMerge(null, { event_key: "finland-closes-border-crossing-2026-10", category: "border_incident", region: "Finland" }, [ev]), null);
 });
+
+test("msUntilLocalHour: 17:50 UTC is 10 minutes before 21:00 Moscow", async () => {
+  const { msUntilLocalHour } = await import("../src/util.ts");
+  assert.equal(msUntilLocalHour("Europe/Moscow", 21, new Date("2026-10-02T17:50:00Z")), 10 * 60_000);
+  assert.ok(msUntilLocalHour("Europe/Moscow", 21, new Date("2026-10-02T18:05:00Z")) < 0);
+});

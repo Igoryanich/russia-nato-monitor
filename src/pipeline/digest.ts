@@ -20,6 +20,7 @@ const ruDate = (iso: string) => `${Number(iso.slice(8, 10))} ${MONTHS[Number(iso
 const schema = z.object({
   summary_ru: z.string().transform((s) => s.trim().slice(0, 700)),
   watch: z.array(z.string().transform((s) => s.trim().slice(0, 40))).transform((a) => a.slice(0, 5)).catch([]),
+  keep_ids: z.array(z.coerce.number().int()).catch([]),
 });
 
 interface Item {
@@ -38,7 +39,10 @@ export function digestItems(db: Db, sinceIso: string): Item[] {
     .all<{ id: number; analysis: string; importance: number; signal: string; category: string; region: string }>(
       `SELECT id, analysis, importance, signal, category, region FROM events
        WHERE analysis IS NOT NULL AND updated_at >= ? AND importance >= 40 AND status NOT IN ('rejected','merged')
-         AND novelty NOT IN ('DUPLICATE','OLD_RESURFACED') ORDER BY importance DESC LIMIT 30`,
+         AND novelty NOT IN ('DUPLICATE','OLD_RESURFACED')
+         -- the story guard already decided these repeat a story that is covered by another item
+         AND id NOT IN (SELECT event_id FROM publications WHERE status = 'cancelled' AND error LIKE 'story duplicate%' AND event_id IS NOT NULL)
+       ORDER BY importance DESC LIMIT 30`,
       sinceIso,
     )
     .map((r) => {
@@ -89,15 +93,15 @@ export async function buildDigest(db: Db, llm: Llm, cfg: Config, day = localDate
   const idx = updateIndex(db, cfg);
   const yesterday = localDate(cfg.TIMEZONE, new Date(Date.now() - 86400_000));
   const weekAgo = localDate(cfg.TIMEZONE, new Date(Date.now() - 7 * 86400_000));
-  const items = digestItems(db, hoursAgo(24));
+  let items = digestItems(db, hoursAgo(24));
   let summary = "Нет данных для вывода.";
   let watch: string[] = [];
   try {
     const r = await llm.json({
-      system: `Ты редактор мониторинга Россия—НАТО. По списку событий за сутки и динамике индекса напиши нейтральный вывод «Что изменилось за сутки» (2–4 коротких предложения, русский язык) СТРОГО на основании данных: что усилилось, что ослабло, какие есть контрсигналы. Не прогнозируй войну, не называй индекс вероятностью. Заявления сторон описывай как заявления. Также верни watch — 2–4 региона/направления, за которыми стоит следить (по-русски, коротко: «Калининград», «Балтийское море»). JSON: {"summary_ru": string, "watch": string[]}`,
+      system: `Ты редактор мониторинга Россия—НАТО. Если несколько событий в списке — одна и та же история, верни в keep_ids только самое информативное из них (по id). По списку событий за сутки и динамике индекса напиши нейтральный вывод «Что изменилось за сутки» (2–4 коротких предложения, русский язык) СТРОГО на основании данных: что усилилось, что ослабло, какие есть контрсигналы. Не прогнозируй войну, не называй индекс вероятностью. Заявления сторон описывай как заявления. Также верни watch — 2–4 региона/направления, за которыми стоит следить (по-русски, коротко: «Калининград», «Балтийское море»). JSON: {"summary_ru": string, "watch": string[], "keep_ids": number[]}`,
       user: JSON.stringify({
         index: { today: idx.value, yesterday: indexOn(db, yesterday), week_ago: indexOn(db, weekAgo), drivers: idx.drivers, counter_signals: idx.counters },
-        events: items.map((i) => ({ headline: i.headline, signal: i.signal, category: i.category, importance: i.importance, region: i.region, confirmation: i.confirmation })),
+        events: items.map((i) => ({ id: i.id, headline: i.headline, signal: i.signal, category: i.category, importance: i.importance, region: i.region, confirmation: i.confirmation })),
       }),
       schema,
       tier: "editor",
@@ -105,6 +109,9 @@ export async function buildDigest(db: Db, llm: Llm, cfg: Config, day = localDate
     });
     summary = r.summary_ru;
     watch = r.watch;
+    // Same-story items collapse to one line; ignore a keep list that would drop most of the day.
+    const keep = new Set(r.keep_ids);
+    if (keep.size >= Math.min(3, items.length)) items = items.filter((i) => keep.has(i.id));
   } catch (err) {
     log.warn("digest summary failed", { err: errMsg(err) });
     watch = [...new Set(items.map((i) => i.region).filter(Boolean))].slice(0, 4);
