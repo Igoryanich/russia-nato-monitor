@@ -44,7 +44,11 @@ try {
       const { drain } = await import("./pipeline/publish.ts");
       if (!config.TELEGRAM_BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN not set");
       const tg = new Telegram(config.TELEGRAM_BOT_TOKEN);
-      console.log({ admin: await pollAdmin(db, config, tg), editorial: queuePublications(db, config), publish: await drain(db, config, tg) });
+      const { storyGuard } = await import("./pipeline/storyguard.ts");
+      const admin = await pollAdmin(db, config, tg);
+      const editorial = queuePublications(db, config);
+      const guard = await storyGuard(db, llm, config);
+      console.log({ admin, editorial, guard, publish: await drain(db, config, tg) });
       break;
     }
     case "collect":

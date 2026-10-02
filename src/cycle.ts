@@ -12,6 +12,7 @@ import { queuePublications } from "./pipeline/editorial.ts";
 import { updateIndex } from "./pipeline/escalation.ts";
 import { creditSources, prune, sourceHealth } from "./pipeline/maintenance.ts";
 import { drain } from "./pipeline/publish.ts";
+import { storyGuard } from "./pipeline/storyguard.ts";
 import { triagePending } from "./pipeline/triage.ts";
 import { Telegram } from "./telegram.ts";
 import { nowIso } from "./util.ts";
@@ -46,6 +47,7 @@ export async function runCycle(db: Db, cfg: Config): Promise<Record<string, unkn
   await stage("editorial", () => queuePublications(db, cfg));
   await stage("index", () => updateIndex(db, cfg).value);
   if (llm.enabled) await stage("digest", () => maybeDigest(db, llm, cfg));
+  if (llm.enabled) await stage("storyguard", () => storyGuard(db, llm, cfg));
   await stage("publish", () => drain(db, cfg, tg));
   await stage("discovery", async () => ({ harvested: harvestCandidates(db), ...(await probeCandidates(db)), ...reviewTestingSources(db) }));
   await stage("health", () => sourceHealth(db));
