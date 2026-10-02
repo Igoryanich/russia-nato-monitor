@@ -150,9 +150,14 @@ test("published event: only a SIGNIFICANT_UPDATE produces a follow-up post, as a
 
 class FakeTelegram extends Telegram {
   sent: string[] = [];
+  calls: [string, Record<string, unknown>][] = [];
   behaviour: "ok" | "ambiguous" | "429" = "ok";
   constructor() {
     super("test");
+  }
+  override async call<T = any>(method: string, body: Record<string, unknown>): Promise<T> {
+    this.calls.push([method, body]);
+    return true as T;
   }
   override async send(_chat: string, html: string): Promise<number> {
     if (this.behaviour === "ambiguous") throw new TelegramAmbiguous("server 502");
@@ -249,4 +254,20 @@ test("switching review → auto releases clean waiting posts and drops their adm
   assert.equal(db.get<{ status: string }>("SELECT status FROM publications WHERE id = ?", pub.id)!.status, "pending");
   assert.equal(db.get<{ status: string }>("SELECT status FROM publications WHERE key = ?", `admin:${pub.id}`)!.status, "cancelled");
   assert.equal(db.get<{ status: string }>("SELECT status FROM events WHERE id = ?", id)!.status, "queued");
+});
+
+test("daily digest is pinned and yesterday's digest unpinned; regular posts are not pinned", async () => {
+  const db = seededDb();
+  const tg = new FakeTelegram();
+  insertEvent(db, analysis());
+  queuePublications(db, cfg);
+  db.run("INSERT INTO publications(key, channel, kind, text, status, created_at, priority) VALUES('digest:2026-10-02','@test','digest','d1','pending',?,500)", nowIso());
+  await drain(db, cfg, tg);
+  const pins = () => tg.calls.filter(([m]) => m === "pinChatMessage").map(([, b]) => b.message_id);
+  assert.equal(pins().length, 1); // only the digest
+  const firstDigest = pins()[0];
+  db.run("INSERT INTO publications(key, channel, kind, text, status, created_at, priority) VALUES('digest:2026-10-03','@test','digest','d2','pending',?,500)", nowIso());
+  await drain(db, cfg, tg);
+  assert.equal(pins().length, 2);
+  assert.deepEqual(tg.calls.filter(([m]) => m === "unpinChatMessage").map(([, b]) => b.message_id), [firstDigest]);
 });

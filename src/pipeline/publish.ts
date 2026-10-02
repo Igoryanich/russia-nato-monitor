@@ -16,6 +16,25 @@ interface PubRow {
 }
 
 /**
+ * Keep exactly one digest pinned: pin the new one silently (the post itself already
+ * notified subscribers), then unpin yesterday's. A failed pin never fails delivery.
+ */
+export async function pinDigest(db: Db, tg: Telegram, channel: string, messageId: number) {
+  const key = `pinned_digest:${channel}`;
+  const previous = Number(db.kvGet(key) ?? 0);
+  try {
+    await tg.call("pinChatMessage", { chat_id: channel, message_id: messageId, disable_notification: true });
+    db.kvSet(key, String(messageId));
+  } catch (e) {
+    log.warn("digest pin failed", { err: errMsg(e) });
+    return;
+  }
+  if (previous && previous !== messageId) {
+    await tg.call("unpinChatMessage", { chat_id: channel, message_id: previous }).catch((e) => log.warn("digest unpin failed", { err: errMsg(e) }));
+  }
+}
+
+/**
  * Deliver pending publications. Telegram has no idempotency key, so a send that
  * might have gone through is marked `uncertain` and never blindly retried.
  */
@@ -38,6 +57,7 @@ export async function drain(db: Db, cfg: Config, tg: Telegram | null): Promise<{
     try {
       const messageId = await tg.send(p.channel, p.text, json(p.extra, {}));
       db.run("UPDATE publications SET status = 'sent', message_id = ?, sent_at = ?, error = NULL WHERE id = ?", messageId, nowIso(), p.id);
+      if (p.kind === "digest") await pinDigest(db, tg, p.channel, messageId);
       if (p.event_id && p.kind !== "admin") {
         channelPosts++;
         db.run(
@@ -64,6 +84,15 @@ export async function drain(db: Db, cfg: Config, tg: Telegram | null): Promise<{
       log.warn("telegram send failed", { pub: p.id, err: errMsg(e) });
     }
     await sleep(1200);
+  }
+  // Self-heal: the latest sent digest must be the pinned one (covers a failed pin or an older digest).
+  const channel = cfg.TELEGRAM_CHANNEL_ID;
+  if (channel) {
+    const latest = db.get<{ message_id: number }>(
+      "SELECT message_id FROM publications WHERE channel = ? AND kind = 'digest' AND status = 'sent' AND message_id IS NOT NULL ORDER BY sent_at DESC LIMIT 1",
+      channel,
+    );
+    if (latest && db.kvGet(`pinned_digest:${channel}`) !== String(latest.message_id)) await pinDigest(db, tg, channel, latest.message_id);
   }
   return { sent, failed };
 }
