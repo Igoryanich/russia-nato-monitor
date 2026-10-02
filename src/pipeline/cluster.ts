@@ -28,7 +28,7 @@ export function jaccard(a: Set<string>, b: Set<string>): number {
 
 export interface Candidate {
   id: number;
-  embedding: number[];
+  embedding: number[] | null;
   key: Set<string>;
   category: string | null;
   region: string | null;
@@ -36,18 +36,24 @@ export interface Candidate {
 
 /** Explainable merge decision. Conservative: two events beat one wrong merge. */
 export function decideMerge(
-  vec: number[],
+  vec: number[] | null,
   t: Pick<Triage, "event_key" | "category" | "region">,
   events: Candidate[],
 ): { id: number; reason: string } | null {
   const key = keyTokens(t.event_key);
   let best: { id: number; reason: string; score: number } | null = null;
   for (const e of events) {
-    const cos = cosine(vec, e.embedding);
     const kj = jaccard(key, e.key);
     const sameRegion = !!t.region && !!e.region && t.region.toLowerCase() === e.region.toLowerCase();
     const sameCat = t.category === e.category;
     let reason = "";
+    if (!vec || !e.embedding) {
+      // Degraded mode (embedding quota exhausted): lexical event_key evidence only, stricter.
+      if (kj >= 0.6 || (kj >= 0.45 && sameRegion && sameCat)) reason = `event_key ${kj.toFixed(2)} (no embedding)`;
+      if (reason && (!best || kj > best.score)) best = { id: e.id, reason, score: kj };
+      continue;
+    }
+    const cos = cosine(vec, e.embedding);
     if (cos >= SIM_STRONG) reason = `cos ${cos.toFixed(3)} ≥ strong`;
     else if (cos >= SIM_MERGE && (kj >= 0.4 || (sameRegion && sameCat))) reason = `cos ${cos.toFixed(3)} + key ${kj.toFixed(2)} / region+category`;
     else if (cos >= SIM_KEY && kj >= 0.6) reason = `event_key ${kj.toFixed(2)} + cos ${cos.toFixed(3)}`;
@@ -114,7 +120,7 @@ export function refreshEvent(db: Db, eventId: number, resolver: DomainResolver) 
      category = ?, signal = ?, region = ?, event_date = COALESCE(?, event_date), embedding = ?, title = COALESCE(NULLIF(?, ''), title)
      WHERE id = ?`,
     nowIso(), members.length, origins.size, JSON.stringify([...origins]), bestTier, JSON.stringify([...sides]),
-    top(votes.category), top(votes.signal), top(votes.region), eventDate, JSON.stringify(centroid(vecs)), titleFrom?.text ?? "", eventId,
+    top(votes.category), top(votes.signal), top(votes.region), eventDate, vecs.length ? JSON.stringify(centroid(vecs)) : null, titleFrom?.text ?? "", eventId,
   );
 }
 
@@ -123,20 +129,23 @@ export async function clusterRelevant(db: Db, llm: Llm, cfg: Config): Promise<{ 
     "SELECT id, title, triage, domain FROM articles WHERE status = 'relevant' AND event_id IS NULL ORDER BY collected_at LIMIT 300",
   );
   if (!rows.length) return { embedded: 0, attached: 0, created: 0 };
-  let vectors: number[][];
+  let vectors: (number[] | null)[];
+  let error: string | undefined;
   try {
     vectors = await llm.embed(rows.map((r) => `${r.title}\n${json<Partial<Triage>>(r.triage, {}).summary ?? ""}`));
   } catch (e) {
-    log.warn("embedding failed", { err: errMsg(e) });
-    return { embedded: 0, attached: 0, created: 0, error: errMsg(e) + (e instanceof BudgetExhausted ? " (budget)" : "") };
+    // Keep the pipeline moving: cluster on lexical evidence instead of stalling analysis for a day.
+    error = errMsg(e) + (e instanceof BudgetExhausted ? " (budget)" : "");
+    log.warn("embedding failed — lexical clustering fallback", { err: error });
+    vectors = rows.map(() => null);
   }
   const resolver = new DomainResolver(db);
   const events: Candidate[] = db
     .all<{ id: number; embedding: string; event_key: string; category: string; region: string }>(
-      "SELECT id, embedding, event_key, category, region FROM events WHERE updated_at >= ? AND embedding IS NOT NULL AND status != 'merged'",
+      "SELECT id, embedding, event_key, category, region FROM events WHERE updated_at >= ? AND status != 'merged'",
       hoursAgo(cfg.EVENT_WINDOW_HOURS),
     )
-    .map((e) => ({ id: e.id, embedding: json<number[]>(e.embedding, []), key: keyTokens(e.event_key), category: e.category, region: e.region }));
+    .map((e) => ({ id: e.id, embedding: json<number[] | null>(e.embedding, null), key: keyTokens(e.event_key), category: e.category, region: e.region }));
 
   let attached = 0;
   let created = 0;
@@ -145,7 +154,7 @@ export async function clusterRelevant(db: Db, llm: Llm, cfg: Config): Promise<{ 
     rows.forEach((r, i) => {
       const t = json<Triage>(r.triage, {} as Triage);
       const vec = vectors[i];
-      db.run("UPDATE articles SET embedding = ? WHERE id = ?", JSON.stringify(vec), r.id);
+      db.run("UPDATE articles SET embedding = ? WHERE id = ?", vec ? JSON.stringify(vec) : null, r.id);
       const match = decideMerge(vec, t, events);
       let eventId: number;
       if (match) {
@@ -157,7 +166,7 @@ export async function clusterRelevant(db: Db, llm: Llm, cfg: Config): Promise<{ 
         eventId = Number(
           db.run(
             "INSERT INTO events(created_at, updated_at, title, event_key, category, signal, region, event_date, embedding) VALUES(?,?,?,?,?,?,?,?,?)",
-            now, now, t.summary || r.title, t.event_key ?? "", t.category ?? null, t.signal ?? null, t.region ?? null, t.event_date ?? null, JSON.stringify(vec),
+            now, now, t.summary || r.title, t.event_key ?? "", t.category ?? null, t.signal ?? null, t.region ?? null, t.event_date ?? null, vec ? JSON.stringify(vec) : null,
           ).lastInsertRowid,
         );
         events.push({ id: eventId, embedding: vec, key: keyTokens(t.event_key ?? ""), category: t.category, region: t.region });
@@ -169,14 +178,15 @@ export async function clusterRelevant(db: Db, llm: Llm, cfg: Config): Promise<{ 
     for (const id of touched) {
       const before = db.get<{ independent_count: number; best_tier: string | null }>("SELECT independent_count, best_tier FROM events WHERE id = ?", id)!;
       refreshEvent(db, id, resolver);
-      const after = db.get<{ independent_count: number; best_tier: string; embedding: string }>("SELECT independent_count, best_tier, embedding FROM events WHERE id = ?", id)!;
+      const after = db.get<{ independent_count: number; best_tier: string; embedding: string | null }>("SELECT independent_count, best_tier, embedding FROM events WHERE id = ?", id)!;
       // Re-analyse only when the sourcing picture changed — new independent origin or a stronger tier.
       if (after.independent_count > before.independent_count || after.best_tier !== before.best_tier || !before.best_tier)
         db.run("UPDATE events SET needs_analysis = 1 WHERE id = ?", id);
       const cand = events.find((e) => e.id === id);
-      if (cand) cand.embedding = json<number[]>(after.embedding, cand.embedding);
+      if (cand) cand.embedding = json<number[] | null>(after.embedding, cand.embedding);
     }
   });
-  log.info("cluster done", { embedded: rows.length, attached, created });
-  return { embedded: rows.length, attached, created };
+  const embedded = vectors.filter(Boolean).length;
+  log.info("cluster done", { embedded, attached, created });
+  return { embedded, attached, created, ...(error ? { error } : {}) };
 }

@@ -73,3 +73,9 @@ test("cluster merge decision is conservative and explainable", () => {
   // Unrelated vector never merges, even with the same category.
   assert.equal(decideMerge(unit([0, 1, 1]), { event_key: "russia-drones-poland-airspace", category: "drone_incident", region: "Poland" }, [ev]), null);
 });
+
+test("degraded clustering without embeddings: merges only on strong event_key evidence", () => {
+  const ev = { id: 3, embedding: null, key: keyTokens("russia-drones-violate-poland-airspace-2026-10"), category: "drone_incident", region: "Poland" };
+  assert.equal(decideMerge(null, { event_key: "russia-drones-violate-poland-airspace-2026-10", category: "drone_incident", region: "Poland" }, [ev])?.id, 3);
+  assert.equal(decideMerge(null, { event_key: "finland-closes-border-crossing-2026-10", category: "border_incident", region: "Finland" }, [ev]), null);
+});
