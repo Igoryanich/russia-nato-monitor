@@ -83,7 +83,8 @@ export class Llm {
       signal: AbortSignal.timeout(120_000),
     });
     const text = await res.text();
-    if (res.status === 429 || res.status === 404 || /RESOURCE_EXHAUSTED|quota/i.test(text.slice(0, 500)) && !res.ok)
+    // 402 = prepay credits depleted (or billing not yet synced): treat like an exhausted model.
+    if (res.status === 402 || res.status === 429 || res.status === 404 || /RESOURCE_EXHAUSTED|quota/i.test(text.slice(0, 500)) && !res.ok)
       throw new QuotaError(`${res.status} ${text.slice(0, 160)}`);
     if (!res.ok) throw new Error(`Gemini ${res.status}: ${text.slice(0, 200)}`);
     return JSON.parse(text);
