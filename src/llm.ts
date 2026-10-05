@@ -60,10 +60,25 @@ export class Llm {
     this.lastCall = Date.now();
   }
 
-  private async post(path: string, body: unknown): Promise<any> {
+  /** Estimated EUR spent today through the paid key (list prices, thinking counted as output). */
+  paidSpendToday(): number {
+    const r = this.db.get<{ tin: number; tout: number }>(
+      "SELECT COALESCE(SUM(tokens_in),0) AS tin, COALESCE(SUM(tokens_out),0) AS tout FROM llm_usage WHERE day = ? AND model LIKE 'paid:%'",
+      this.day(),
+    );
+    return ((r?.tin ?? 0) * this.cfg.PAID_PRICE_IN_PER_M + (r?.tout ?? 0) * this.cfg.PAID_PRICE_OUT_PER_M) / 1e6;
+  }
+
+  /** Would the next paid call (worst case: full prompt + full output incl. thinking) exceed today's cap? */
+  private paidBudgetAllows(promptChars: number, maxTokens: number): boolean {
+    const worst = ((promptChars / 3) * this.cfg.PAID_PRICE_IN_PER_M + maxTokens * 2 * this.cfg.PAID_PRICE_OUT_PER_M) / 1e6;
+    return this.paidSpendToday() + worst <= this.cfg.PAID_DAILY_BUDGET_EUR;
+  }
+
+  private async post(path: string, body: unknown, apiKey = this.cfg.GEMINI_API_KEY): Promise<any> {
     const res = await fetch(`${API}/${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": this.cfg.GEMINI_API_KEY },
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(120_000),
     });
@@ -83,11 +98,20 @@ export class Llm {
     maxTokens?: number;
     temperature?: number;
   }): Promise<z.infer<T>> {
-    const chain = (opts.tier === "editor" ? this.cfg.LLM_EDITOR_MODELS : this.cfg.LLM_MODELS)
-      .split(",").map((m) => m.trim()).filter((m) => m && !this.dead.has(m));
+    const free = (opts.tier === "editor" ? this.cfg.LLM_EDITOR_MODELS : this.cfg.LLM_MODELS).split(",").map((m) => m.trim());
+    // The paid key only ever serves the editor tier, first in its chain.
+    const paid = opts.tier === "editor" && this.cfg.GEMINI_PAID_API_KEY ? [`paid:${this.cfg.PAID_EDITOR_MODEL}`] : [];
+    const chain = [...paid, ...free].filter((m) => m && !this.dead.has(m));
     if (!chain.length) throw new BudgetExhausted("all models exhausted for this run");
     let lastErr: unknown;
-    for (const model of chain) {
+    for (const entry of chain) {
+      const isPaid = entry.startsWith("paid:");
+      const model = isPaid ? entry.slice(5) : entry;
+      if (isPaid && !this.paidBudgetAllows(opts.system.length + opts.user.length, opts.maxTokens ?? 8192)) {
+        log.info("paid daily budget reached, using free editor models", { spent: this.paidSpendToday().toFixed(3) });
+        this.dead.add(entry);
+        continue;
+      }
       const gemma = model.startsWith("gemma");
       for (let attempt = 0; attempt < 2; attempt++) {
         this.checkBudget();
@@ -104,9 +128,11 @@ export class Llm {
         };
         if (!gemma) body.systemInstruction = { parts: [{ text: opts.system }] };
         try {
-          const data = await this.post(`models/${model}:generateContent`, body);
+          const data = await this.post(`models/${model}:generateContent`, body, isPaid ? this.cfg.GEMINI_PAID_API_KEY : undefined);
           const text: string = data.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? "";
           const um = data.usageMetadata ?? {};
+          // Thinking tokens are billed as output: fold them in so the paid budget sees the real cost.
+          um.candidatesTokenCount = (um.candidatesTokenCount ?? 0) + (um.thoughtsTokenCount ?? 0);
           if (process.env.LLM_DUMP) appendFileSync(process.env.LLM_DUMP, `
 === ${model}
 ${text}
@@ -114,24 +140,24 @@ ${text}
           const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
           const parsed = opts.schema.safeParse(JSON.parse(cleaned));
           if (!parsed.success) {
-            this.record(model, false, um.promptTokenCount, um.candidatesTokenCount);
+            this.record(entry, false, um.promptTokenCount, um.candidatesTokenCount);
             lastErr = new Error(parsed.error.issues.slice(0, 4).map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
             log.warn("llm output failed validation", { model, err: errMsg(lastErr), finish: data.candidates?.[0]?.finishReason });
             continue;
           }
-          this.record(model, true, um.promptTokenCount, um.candidatesTokenCount);
+          this.record(entry, true, um.promptTokenCount, um.candidatesTokenCount);
           return parsed.data;
         } catch (e) {
           lastErr = e;
           if (e instanceof QuotaError) {
-            this.record(model, false);
-            log.warn("model quota/unavailable, falling back", { model, err: errMsg(e) });
-            this.dead.add(model);
+            this.record(entry, false);
+            log.warn("model quota/unavailable, falling back", { model: entry, err: errMsg(e) });
+            this.dead.add(entry);
             break;
           }
           if (e instanceof BudgetExhausted) throw e;
-          this.record(model, false);
-          if (!(e instanceof SyntaxError)) log.warn("llm call failed", { model, err: errMsg(e) });
+          this.record(entry, false);
+          if (!(e instanceof SyntaxError)) log.warn("llm call failed", { model: entry, err: errMsg(e) });
         }
       }
     }

@@ -32,6 +32,8 @@ jobs:
     timeout-minutes: 25
     env:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_PAID_API_KEY: ${{ secrets.GEMINI_PAID_API_KEY }}
+      PAID_DAILY_BUDGET_EUR: ${{ vars.PAID_DAILY_BUDGET_EUR || '0.24' }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
       TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
