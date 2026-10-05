@@ -5,6 +5,7 @@ import { BudgetExhausted, centroid, cosine, type Llm } from "../llm.ts";
 import { errMsg, log } from "../log.ts";
 import { TIER_WEIGHT } from "../sources.ts";
 import { hoursAgo, nowIso, rootDomain } from "../util.ts";
+import { scoreEvent } from "./score.ts";
 import type { Triage } from "./triage.ts";
 
 // Thresholds for gemini-embedding-001 (768d, CLUSTERING task). Unrelated
@@ -180,8 +181,12 @@ export async function clusterRelevant(db: Db, llm: Llm, cfg: Config): Promise<{ 
       refreshEvent(db, id, resolver);
       const after = db.get<{ independent_count: number; best_tier: string; embedding: string | null }>("SELECT independent_count, best_tier, embedding FROM events WHERE id = ?", id)!;
       // Re-analyse only when the sourcing picture changed — new independent origin or a stronger tier.
-      if (after.independent_count > before.independent_count || after.best_tier !== before.best_tier || !before.best_tier)
+      if (after.independent_count > before.independent_count || after.best_tier !== before.best_tier || !before.best_tier) {
         db.run("UPDATE events SET needs_analysis = 1 WHERE id = ?", id);
+        // Sourcing changed: refresh importance now from the existing analysis instead of waiting
+        // for the analysis queue (corroboration is part of the score).
+        scoreEvent(db, id);
+      }
       const cand = events.find((e) => e.id === id);
       if (cand) cand.embedding = json<number[] | null>(after.embedding, cand.embedding);
     }

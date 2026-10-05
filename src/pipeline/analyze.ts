@@ -118,6 +118,7 @@ export function mergeInto(db: Db, fromId: number, intoId: number, resolver: Doma
     db.run("UPDATE events SET status = 'merged', review_note = ? WHERE id = ?", `merged into #${intoId}`, fromId);
     db.run("UPDATE publications SET status = 'cancelled', error = 'merged duplicate' WHERE event_id = ? AND status IN ('review','pending')", fromId);
     refreshEvent(db, intoId, resolver);
+    scoreEvent(db, intoId);
     db.run("UPDATE events SET needs_analysis = 1 WHERE id = ?", intoId);
   });
   log.info("events merged", { from: fromId, into: intoId });
