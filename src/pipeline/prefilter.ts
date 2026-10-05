@@ -38,20 +38,45 @@ const STRONG = [
   "belarus", "беларус", "белорус", "nato", "нато",
 ];
 
-function compile(terms: string[]): RegExp {
+// Hybrid operations against NATO-country institutions, politicians and infrastructure are core
+// to the channel even when the article does not (yet) name Russia — e.g. break-ins at MPs' homes.
+// A hit counts as both security vocabulary and a strong term, so it passes the screen on its own.
+const HYBRID = [
+  "break-in", "intrusion", "intruder", "surveillance", "foreign intelligence", "security service", "influence operation", "disinformation", "vandalis",
+  "проникновен", "слежк", "спецслужб", "вербов", "дезинформац", "вмешательств",
+  "tunkeutu", "murtautu", "suojelupoliisi", "vaikuttamisoperaatio", "hybridivaikutt", "informaatiovaikutt",
+  "inbrott", "intrång", "säkerhetspolis", "påverkansoperation",
+  "innbrudd", "inntreng", "politiets sikkerhetstjeneste", "indbrud", "efterretningstjeneste",
+  "sissetung", "luureteenistus", "mõjutustegevus", "kaitsepolitsei",
+  "ielauš", "valsts drošības dienest", "ietekmes operāc",
+  "įsilauž", "valstybės saugumo", "įtakos operac",
+  "właman", "włamani", "inwigil", "agentur", "dezinformac",
+  "einbruch", "eindring", "verfassungsschutz", "einflussoperation", "desinformation",
+];
+// Short agency abbreviations: whole-word only ("gru" must not match "group").
+const AGENCIES = ["gru", "fsb", "svr", "kgb", "гру", "фсб", "свр", "supo", "säpo", "kapo", "pst", "abw", "skw", "bfv", "bnd", "mi5", "vsd", "vdd"];
+
+function compile(terms: string[], wholeWord = false): RegExp {
   const esc = [...new Set(terms)].map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  return new RegExp(`(?<![\\p{L}\\p{N}])(?:${esc.join("|")})`, "giu");
+  return new RegExp(`(?<![\\p{L}\\p{N}])(?:${esc.join("|")})${wholeWord ? "(?![\\p{L}\\p{N}])" : ""}`, "giu");
 }
 
 const RE_ACTORS = compile(ACTORS);
 const RE_SECURITY = compile(SECURITY);
 const RE_STRONG = compile(STRONG);
+const RE_HYBRID = compile(HYBRID);
+const RE_AGENCIES = compile(AGENCIES, true);
+
+/** Bump when the vocabulary changes: recent filtered items are re-screened once. */
+export const PREFILTER_VERSION = 2;
 
 /** 0..4: actor present (+1), security vocabulary (+1), strong theatre/term hit (+1, +1 for several). */
 export function prefilterScore(text: string): number {
-  const t = text.slice(0, 5000);
+  // Soft hyphens (U+00AD) split words invisibly in Finnish/German headlines: "kansan­edustajien".
+  const t = text.slice(0, 5000).replace(/­/g, "");
+  const hybrid = (t.match(RE_HYBRID) ?? []).length + (t.match(RE_AGENCIES) ?? []).length;
   const actor = (t.match(RE_ACTORS) ?? []).length;
-  const sec = (t.match(RE_SECURITY) ?? []).length;
-  const strong = (t.match(RE_STRONG) ?? []).length;
+  const sec = (t.match(RE_SECURITY) ?? []).length + hybrid;
+  const strong = (t.match(RE_STRONG) ?? []).length + hybrid;
   return (actor ? 1 : 0) + (sec ? 1 : 0) + (strong ? 1 : 0) + (strong >= 3 || (actor >= 2 && sec >= 3) ? 1 : 0);
 }

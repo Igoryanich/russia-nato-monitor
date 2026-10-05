@@ -6,7 +6,7 @@ import type { Db } from "../db.ts";
 import { errMsg, log } from "../log.ts";
 import { activeSources } from "../sources.ts";
 import { canonicalUrl, domainOf, hoursAgo, normalizeTitle, nowIso, sha } from "../util.ts";
-import { prefilterScore } from "./prefilter.ts";
+import { PREFILTER_VERSION, prefilterScore } from "./prefilter.ts";
 
 export interface CollectStats {
   sources: number;
@@ -33,7 +33,32 @@ async function fetchSource(db: Db, s: SourceRow): Promise<RawItem[]> {
   return collectors[s.kind as Exclude<SourceRow["kind"], "web">].collect(s);
 }
 
+/** When the screen's vocabulary changes, give recently filtered items one more look. */
+export function rescreenFiltered(db: Db, cfg: Config): number {
+  if (db.kvGet("prefilter_version") === String(PREFILTER_VERSION)) return 0;
+  const rows = db.all<{ id: number; title: string; body: string; focused: number; tier: string }>(
+    `SELECT a.id, a.title, a.body, s.focused, s.tier FROM articles a JOIN sources s ON s.id = a.source_id
+     WHERE a.status = 'filtered' AND a.collected_at >= ?`,
+    hoursAgo(cfg.MAX_ARTICLE_AGE_HOURS),
+  );
+  let revived = 0;
+  db.tx(() => {
+    for (const r of rows) {
+      const pf = prefilterScore(`${r.title}\n${r.body}`);
+      const pass = r.focused ? pf >= 1 || r.tier === "A" || r.tier === "E" : pf >= 2;
+      if (pass) {
+        db.run("UPDATE articles SET status = 'new', prefilter = ? WHERE id = ?", pf, r.id);
+        revived++;
+      }
+    }
+    db.kvSet("prefilter_version", String(PREFILTER_VERSION));
+  });
+  if (revived) log.info("re-screened filtered items", { revived, of: rows.length });
+  return revived;
+}
+
 export async function collectAll(db: Db, cfg: Config, only?: string[]): Promise<CollectStats> {
+  rescreenFiltered(db, cfg);
   let sources = activeSources(db).filter((s) => cfg.GDELT_ENABLED || s.kind !== "gdelt");
   if (only?.length) sources = sources.filter((s) => only.includes(s.key));
   const stats: CollectStats = { sources: sources.length, failed: 0, fetched: 0, inserted: 0, old: 0, duplicates: 0, filtered: 0, errors: {} };

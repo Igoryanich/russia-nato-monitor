@@ -11,7 +11,7 @@ import { attachPrimarySources } from "./primary.ts";
 import { scoreEvent } from "./score.ts";
 import type { Triage } from "./triage.ts";
 
-export const ANALYSIS_VERSION = 1;
+export const ANALYSIS_VERSION = 2;
 
 const cut = (n: number) => z.string().transform((s) => s.trim().slice(0, n));
 const unit = z.coerce.number().transform((r) => (r > 10 ? r / 100 : r > 1 ? r / 10 : r)).pipe(z.number().min(0).max(1));
@@ -78,7 +78,7 @@ watch_ru — за чем следить дальше (одно предложе�
 statements — ключевые утверждения с типом FACT | OFFICIAL_CLAIM | OSINT_CLAIM | ASSESSMENT | ANALYSIS | UNCONFIRMED и кому они принадлежат.
 novelty — NEW_EVENT | SIGNIFICANT_UPDATE | MINOR_UPDATE | DUPLICATE | BACKGROUND | OLD_RESURFACED. Если дан previously_published — сравни с ним: SIGNIFICANT_UPDATE только при существенно новых фактах (подтверждение, атрибуция, масштаб, жертвы, официальная реакция). Если это то же событие, что одно из recent_events (тот же инцидент/заявление/решение, пусть другими словами) — DUPLICATE и duplicate_of = его id. BACKGROUND — аналитика/обзор без нового события.
 confidence — 0..1 насколько надёжно установлено, что ядро события произошло как описано.
-factors (0..1): military_significance (военная значимость), geographic_significance (близость к линии соприкосновения НАТО—Россия/Беларусь), direct_relevance (прямое отношение к отношениям Россия—НАТО), official_involvement (участие/заявления официальных органов), baseline_change (насколько это отличается от обычного фона).
+factors (0..1): military_significance (значимость для безопасности — военная ИЛИ гибридная: диверсии, шпионаж, проникновения и слежка за политиками и чиновниками, удары по критической инфраструктуре, кибератаки; гибридная операция против институтов страны НАТО не менее значима, чем военная активность), geographic_significance (близость к линии соприкосновения НАТО—Россия/Беларусь), direct_relevance (прямое отношение к отношениям Россия—НАТО), official_involvement (участие/заявления официальных органов), baseline_change (насколько это отличается от обычного фона).
 headline_risk — true, если заголовок/текст легко прочитать сильнее, чем позволяют доказательства.
 primary_url — URL первоисточника или самого авторитетного материала, СТРОГО из списка материалов. source_urls — до 3 URL из списка (первоисточник первым).
 hashtags — 1–3 тега на русском без #, напр. «Балтика», «дроны».
@@ -128,8 +128,10 @@ export async function analyzePending(db: Db, llm: Llm, cfg: Config): Promise<{ a
   const events = db.all<{ id: number; published_version: number; analysis: string | null; status: string }>(
     `SELECT e.id, e.published_version, e.analysis, e.status FROM events e
      WHERE e.needs_analysis = 1 AND e.status NOT IN ('rejected','merged') AND e.updated_at >= ?
-     ORDER BY (SELECT MAX(relevance) FROM articles WHERE event_id = e.id) * (CASE e.best_tier WHEN 'A' THEN 1.2 WHEN 'B' THEN 1.15 WHEN 'C' THEN 1.05 ELSE 1 END)
-              + 0.08 * MIN(e.independent_count, 5) DESC
+     -- Relevance first: an "official" tier must not let routine ministry posts starve local reporting.
+     ORDER BY (SELECT MAX(relevance) FROM articles WHERE event_id = e.id)
+              + 0.06 * MIN(e.independent_count, 5)
+              + (CASE e.best_tier WHEN 'A' THEN 0.05 WHEN 'B' THEN 0.05 WHEN 'C' THEN 0.03 ELSE 0 END) DESC
      LIMIT ?`,
     hoursAgo(cfg.EVENT_WINDOW_HOURS), cfg.MAX_ANALYZE_PER_RUN,
   );

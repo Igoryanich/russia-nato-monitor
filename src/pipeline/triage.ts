@@ -5,7 +5,7 @@ import { BudgetExhausted, type Llm } from "../llm.ts";
 import { errMsg, log } from "../log.ts";
 import { CATEGORIES, SIGNALS, STATEMENT_TYPES } from "../taxonomy.ts";
 
-export const TRIAGE_VERSION = 1;
+export const TRIAGE_VERSION = 2;
 
 // Lenient by design: one odd field must not throw away a 25-item batch.
 const cut = (n: number) => z.string().transform((s) => s.trim().slice(0, n));
@@ -40,6 +40,8 @@ airspace/border/drone incidents, sabotage, arson, espionage, cyberattacks, GPS j
 nuclear rhetoric or posture; official threat warnings and intelligence assessments; NATO reinforcement, US force posture, Article 4/5;
 mobilisation, readiness, civil defence/evacuation preparation; Russian/Belarusian official statements threatening or addressing NATO;
 diplomatic escalation or de-escalation between Russia and NATO; and COUNTER-SIGNALS: exercises ending, troops returning, talks, "no imminent threat", claims disproven.
+ALSO RELEVANT (0.6–0.9) even when the perpetrator is not (yet) named: suspected hybrid operations against NATO-country institutions, politicians, officials or critical infrastructure — e.g. unexplained break-ins at MPs' or officials' homes, surveillance of politicians, arson of strategic sites, drones over bases, cable damage — and security-service (Supo, Säpo, KAPO, ABW, BfV, MI5…) warnings about Russian activity.
+ROUTINE (≤0.4): ceremonial or patriotic posts, anniversaries, awards and greetings by Russian/Belarusian ministries; Russian strikes in Ukraine without a NATO angle.
 PARTLY RELEVANT (0.3–0.55): defence budgets/procurement of eastern-flank states, general commentary, Ukraine-war items with only indirect NATO angle.
 NOT RELEVANT (<0.3): Ukraine front-line combat news without spillover to NATO territory or direct Russia–NATO dimension, domestic politics, economy, sports, culture, unrelated crime, other regions.
 

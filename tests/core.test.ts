@@ -85,3 +85,10 @@ test("msUntilLocalHour: 17:50 UTC is 10 minutes before 21:00 Moscow", async () =
   assert.equal(msUntilLocalHour("Europe/Moscow", 21, new Date("2026-10-02T17:50:00Z")), 10 * 60_000);
   assert.ok(msUntilLocalHour("Europe/Moscow", 21, new Date("2026-10-02T18:05:00Z")) < 0);
 });
+
+test("prefilter v2: hybrid operations pass without naming Russia; soft hyphens ignored; agency abbreviations whole-word", () => {
+  assert.ok(prefilterScore("Näin maailmalla on uutisoitu mahdollisista tunkeutumisista kansanedustajien koteihin") >= 2);
+  assert.ok(prefilterScore("Kansan­edustajat | Savola moittii toimintaa tunkeutumis­ta") >= 2);
+  assert.ok(prefilterScore("Vieraskynä: GRU tunkeutuu kotiisi") >= 2);
+  assert.equal(prefilterScore("The group raised money for charity"), 0);
+});
