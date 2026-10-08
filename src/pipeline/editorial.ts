@@ -4,7 +4,7 @@ import { DomainResolver } from "../domains.ts";
 import { effectiveMode } from "../admin/bot.ts";
 import { log } from "../log.ts";
 import { CATEGORY_RU, TIER_RU } from "../taxonomy.ts";
-import { escapeHtml as e, nowIso } from "../util.ts";
+import { escapeHtml as e, hoursAgo, nowIso } from "../util.ts";
 import type { Analysis } from "./analyze.ts";
 import { checkText, renderPost } from "./compose.ts";
 import type { ImportanceBreakdown } from "./score.ts";
@@ -26,6 +26,7 @@ interface EventRow {
   published_version: number;
   event_date: string | null;
   status: string;
+  analyzed_at?: string | null;
 }
 
 export function editorialChecks(ev: EventRow, a: Analysis, cfg: Config, today = new Date()): Check[] {
@@ -74,13 +75,33 @@ export function adminPreview(eventId: number, a: Analysis, imp: ImportanceBreakd
     .slice(0, 4000);
 }
 
+export const MAX_UPDATES_PER_EVENT = 3;
+export const UPDATE_COOLDOWN_HOURS = 12;
+
+/**
+ * A follow-up post needs an analysis made AFTER the last post about this event —
+ * otherwise the same "SIGNIFICANT_UPDATE" verdict would be re-published every pass
+ * (the 2026-10-05..08 incident: 84 repeated posts). Plus hard caps as a backstop.
+ */
+export function updateAllowed(db: Db, ev: Pick<EventRow, "id" | "analyzed_at">, channel: string): boolean {
+  const last = db.get<{ at: string | null; n: number }>(
+    `SELECT MAX(created_at) AS at, COUNT(*) AS n FROM publications
+     WHERE event_id = ? AND channel = ? AND kind IN ('post','breaking','update') AND status IN ('sent','sending','uncertain','pending')`,
+    ev.id, channel,
+  );
+  if (!last?.at) return true;
+  if (!ev.analyzed_at || ev.analyzed_at <= last.at) return false;
+  if (last.n > MAX_UPDATES_PER_EVENT) return false;
+  return last.at < hoursAgo(UPDATE_COOLDOWN_HOURS);
+}
+
 /** Decide what to do with freshly analysed events and queue posts. */
 export function queuePublications(db: Db, cfg: Config): { queued: number; review: number; background: number } {
   const resolver = new DomainResolver(db);
   const channel = cfg.TELEGRAM_CHANNEL_ID || "dry-run";
   const mode = effectiveMode(db, cfg);
   const rows = db.all<EventRow>(
-    `SELECT id, analysis, importance, importance_factors, independent_count, best_tier, published_version, event_date, status
+    `SELECT id, analysis, importance, importance_factors, independent_count, best_tier, published_version, event_date, status, analyzed_at
      FROM events WHERE analysis IS NOT NULL AND needs_analysis = 0 AND status IN ('analyzed','published','review','queued') AND importance IS NOT NULL`,
   );
   let queued = 0;
@@ -89,6 +110,7 @@ export function queuePublications(db: Db, cfg: Config): { queued: number; review
   for (const ev of rows) {
     const a = json<Analysis | null>(ev.analysis, null);
     if (!a) continue;
+    if (ev.published_version > 0 && !updateAllowed(db, ev, channel)) continue;
     const version = ev.published_version + 1;
     const key = `event:${ev.id}:v${version}`;
     const existing = db.get<{ id: number; status: string }>("SELECT id, status FROM publications WHERE key = ? AND channel = ?", key, channel);

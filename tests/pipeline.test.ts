@@ -137,15 +137,38 @@ test("published event: only a SIGNIFICANT_UPDATE produces a follow-up post, as a
   const db = seededDb();
   const id = insertEvent(db, analysis({ novelty: "MINOR_UPDATE" }));
   db.run("UPDATE events SET status = 'published', published_version = 1 WHERE id = ?", id);
-  db.run("INSERT INTO publications(key, channel, event_id, kind, text, status, message_id, created_at) VALUES('event:'||?||':v1','@test',?,'post','x','sent',555,?)", id, id, nowIso());
+  const dayAgo = new Date(Date.now() - 24 * 3600_000).toISOString();
+  db.run("INSERT INTO publications(key, channel, event_id, kind, text, status, message_id, created_at) VALUES('event:'||?||':v1','@test',?,'post','x','sent',555,?)", id, id, dayAgo);
   assert.equal(queuePublications(db, cfg).queued, 0);
-  db.run("UPDATE events SET analysis = ? WHERE id = ?", JSON.stringify(analysis({ novelty: "SIGNIFICANT_UPDATE" })), id);
+  // A verdict from BEFORE the post is not an update.
+  db.run("UPDATE events SET analysis = ?, analyzed_at = ? WHERE id = ?", JSON.stringify(analysis({ novelty: "SIGNIFICANT_UPDATE" })), new Date(Date.now() - 30 * 3600_000).toISOString(), id);
+  scoreEvent(db, id);
+  assert.equal(queuePublications(db, cfg).queued, 0);
+  // A fresh analysis (new material) is.
+  db.run("UPDATE events SET analyzed_at = ? WHERE id = ?", nowIso(), id);
   scoreEvent(db, id);
   assert.equal(queuePublications(db, cfg).queued, 1);
   const p = db.get<{ kind: string; extra: string; text: string }>("SELECT kind, extra, text FROM publications WHERE key = ?", `event:${id}:v2`)!;
   assert.equal(p.kind, "update");
   assert.equal(JSON.parse(p.extra).reply_parameters.message_id, 555);
   assert.ok(p.text.includes("Обновление:"));
+});
+
+test("regression 2026-10-08: a sent update is never re-queued from the same analysis", async () => {
+  const db = seededDb();
+  const id = insertEvent(db, analysis({ novelty: "SIGNIFICANT_UPDATE" }));
+  const tg = new FakeTelegram();
+  queuePublications(db, cfg);
+  await drain(db, cfg, tg); // first post
+  db.run("UPDATE publications SET created_at = ? WHERE event_id = ?", new Date(Date.now() - 24 * 3600_000).toISOString(), id);
+  db.run("UPDATE events SET analyzed_at = ? WHERE id = ?", nowIso(), id); // genuinely new analysis
+  queuePublications(db, cfg);
+  await drain(db, cfg, tg); // one legitimate update
+  for (let pass = 0; pass < 5; pass++) {
+    queuePublications(db, cfg);
+    await drain(db, cfg, tg);
+  }
+  assert.equal(tg.sent.length, 2, "post + exactly one update, however many passes run");
 });
 
 class FakeTelegram extends Telegram {

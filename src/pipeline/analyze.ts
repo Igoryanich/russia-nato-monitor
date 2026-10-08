@@ -188,7 +188,7 @@ export async function analyzePending(db: Db, llm: Llm, cfg: Config): Promise<{ a
       if (!a.source_urls.includes(a.primary_url)) a.source_urls.unshift(a.primary_url);
       a.source_urls = a.source_urls.slice(0, 3);
       db.run(
-        `UPDATE events SET analysis = ?, needs_analysis = 0, analyzed_article_count = article_count, novelty = ?,
+        `UPDATE events SET analysis = ?, needs_analysis = 0, analyzed_article_count = article_count, novelty = ?, analyzed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
          category = ?, signal = ?, region = COALESCE(NULLIF(?, ''), region), event_date = COALESCE(?, event_date),
          status = CASE WHEN status IN ('new','analyzed','background') THEN 'analyzed' ELSE status END WHERE id = ?`,
         JSON.stringify({ ...a, version: ANALYSIS_VERSION }), a.novelty, a.category, a.signal, a.region, a.event_date, ev.id,

@@ -133,6 +133,8 @@ const MIGRATIONS: string[] = [
   // 2: per-publication Telegram extras (reply_to, inline keyboard) and editorial priority.
   `ALTER TABLE publications ADD COLUMN extra TEXT;
    ALTER TABLE publications ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;`,
+  // 3: when the current analysis was produced — an update may only follow a newer analysis.
+  `ALTER TABLE events ADD COLUMN analyzed_at TEXT;`,
 ];
 
 export type Row = Record<string, SQLInputValue>;
